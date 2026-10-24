@@ -1,7 +1,7 @@
-# NativeHidInput
+# ShengHidInput
 
-HID input driver. Publishes keyboard, pointer and touch events to IOHIDFamily.
+sheng touch input through IOHIDDevice.
 
-Current state: used by the sheng touch path.
+used by the sheng touch path.
 
-Linked into XNU by `unixnu build kernel`.
+Build and interface details: [documentation](https://unixnu.com/drivers/sheng-hid-input). Component sources and dependencies: [catalog](https://unixnu.com/reference/components).
