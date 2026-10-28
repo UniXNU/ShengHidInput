@@ -159,8 +159,8 @@ static void dispatch(IOService *self,OSObject *event,IOOptionBits options) {
 // They are not searched for: a kernel pointer's PAC has about 24 bits, so among 65536 discriminators a slot often has a second one whose
 // signature for the old address is the same, and the first match found was then wrong for the copy (slot 214, 0xcca1: a PAC failure in
 // IOHIDFamily and dead touch, untagged-31ec7a92ba). Every slot is checked against the original table before the copy is used; a table that
-// is not this one (another OS build) is left alone. [1] is the number of slots copied (0 = not installed), [2] the first slot that did not
-// check out (kSlots: none).
+// is not this one (another OS build) is left alone. [0] the outcome (1 another class, 2 a slot that did not check out, 3 installed), [1]
+// the number of slots copied (0 = not installed), [2] the first slot that did not check out (kSlots: none).
 extern "C" {volatile uint32_t native_touch_edge_install[3];}
 static const uint16_t kSlotDiversity[]={
     0x3771,0x56b7,0xbaa2,0x3607,0x2e4a,0x3a87,0x89a9,0xfffc,0xfc74,0x5635,0xbe60,0x32e5,
@@ -188,9 +188,12 @@ static_assert(kDriverSlots>kDispatch && kDriverSlots<=kSlots,"the dispatch slot 
 static void install(IORegistryEntry *driver) {
     if(originalDispatch || !driver)return;
     if(kSlotDiversity[kDispatch]!=kDivDispatch)return;
-    // The table is IOHIDEventDriver's own: a subclass has slots past it that a copy of this size would lose.
+    // The table fits these classes only, each checked in 24A446's kernelcache to have exactly these 220 slots with these discriminators:
+    // IOHIDEventDriver, and AppleUserHIDEventService, its subclass that drives this device (the user-space HID driver's service). Any
+    // other subclass may have slots past the table, which a copy of this size would lose.
     const OSMetaClass *meta=driver->getMetaClass();
-    if(!meta || strcmp(meta->getClassName(),"IOHIDEventDriver"))return;
+    const char *name=meta?meta->getClassName():nullptr;
+    if(!name || (strcmp(name,"IOHIDEventDriver") && strcmp(name,"AppleUserHIDEventService"))) {native_touch_edge_install[0]=1;return;}
     void **table=vtableOf(driver);
     void **copy=static_cast<void **>(IOMalloc(kDriverSlots*sizeof(void *)));
     if(!copy)return;
@@ -212,7 +215,10 @@ static void install(IORegistryEntry *driver) {
         copied=i+1;
     }
     native_touch_edge_install[1]=copied;
-    if(copied!=kDriverSlots || !originalDispatch) {originalDispatch=nullptr;IOFree(copy,kDriverSlots*sizeof(void *));return;}
+    if(copied!=kDriverSlots || !originalDispatch) {
+        native_touch_edge_install[0]=2;originalDispatch=nullptr;IOFree(copy,kDriverSlots*sizeof(void *));return;
+    }
+    native_touch_edge_install[0]=3;
     __asm__ volatile("dmb ish":::"memory");
     *reinterpret_cast<void **>(driver)=ptrauth_sign_unauthenticated(copy,ptrauth_key_process_independent_data,
         ptrauth_blend_discriminator(driver,kVptrDiscriminator));
