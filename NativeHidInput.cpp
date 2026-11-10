@@ -400,7 +400,7 @@ public:
         else{
             size=sizeof(descriptor);memcpy(combined,descriptor,size);
             // Default: one device, keyboard collection first, digitizer second (the arrangement whose event driver
-            // and user client attach on hardware); the separate digitizer device is the opt-in sheng-touch-split.
+            // and user client attach on hardware); the separate digitizer device is the opt-in touch-split.
             if(touchEnabled){memcpy(combined+size,touchDescriptor,sizeof(touchDescriptor));size+=sizeof(touchDescriptor);}
         }
         *out=IOBufferMemoryDescriptor::withBytes(combined,size,kIODirectionNone);
@@ -412,7 +412,7 @@ public:
         // keyboard. This is a matching property, not a client entitlement.
         if(!setProperty("HIDDefaultBehavior",true))return false;
         unsigned touch=0;
-        touchEnabled=PE_parse_boot_argn("sheng-touch-hid",&touch,sizeof(touch)) && touch==1;
+        touchEnabled=PE_parse_boot_argn("touch-hid",&touch,sizeof(touch)) && touch==1;
         // DigitizerCollectionDispatch: IOHIDEventDriver (setDigitizerProperties) reads it up the service plane and then sends each
         // report's fingers as one digitizer collection with a child per finger. Without it a touch screen gets one event per finger,
         // and backboardd takes each as the whole touch set, so no two fingers are ever down together for UIKit (no pinch, no
