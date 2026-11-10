@@ -15,6 +15,10 @@
 #include <libkern/c++/OSString.h>
 #include <libkern/c++/OSIterator.h>
 #include <pexpert/pexpert.h>
+#if defined(XNU_TARGET_OS_OSX) && XNU_TARGET_OS_OSX
+#include <IOKit/IODeviceTreeSupport.h>
+#include <libkern/c++/OSData.h>
+#endif
 #if __has_feature(ptrauth_calls)
 #include <ptrauth.h>
 #endif
@@ -406,6 +410,35 @@ public:
         *out=IOBufferMemoryDescriptor::withBytes(combined,size,kIODirectionNone);
         return *out?kIOReturnSuccess:kIOReturnNoMemory;
     }
+#if defined(XNU_TARGET_OS_OSX) && XNU_TARGET_OS_OSX
+    // The built-in display's container UUID, made as NativeLegacyDisplay::containerID makes it: FNV-1a of /chosen/unique-chip-id, then of
+    // the label, twice; name-based version bits, RFC 4122 variant.
+    void publishContainerID() {
+        uint64_t seed=0;
+        if(IORegistryEntry *chosen=IORegistryEntry::fromPath("/chosen",gIODTPlane)) {
+            OSData *id=OSDynamicCast(OSData,chosen->getProperty("unique-chip-id"));
+            if(id && id->getLength()>=sizeof(seed))memcpy(&seed,id->getBytesNoCopy(),sizeof(seed));
+            chosen->release();
+        }
+        static const char label[]="builtin-display-container";
+        uint8_t u[16];uint64_t h=0xcbf29ce484222325ull;
+        for(unsigned i=0;i<8;++i)h=(h^((seed>>(8*i))&0xff))*0x100000001b3ull;
+        for(unsigned half=0;half<2;++half) {
+            for(const char *c=label;*c;++c)h=(h^(uint8_t)*c)*0x100000001b3ull;
+            h=(h^half)*0x100000001b3ull;
+            for(unsigned i=0;i<8;++i)u[half*8+i]=(uint8_t)(h>>(8*i));
+        }
+        u[6]=(uint8_t)((u[6]&0x0f)|0x50);u[8]=(uint8_t)((u[8]&0x3f)|0x80);
+        char text[37];
+        snprintf(text,sizeof(text),"%02X%02X%02X%02X-%02X%02X-%02X%02X-%02X%02X-%02X%02X%02X%02X%02X%02X",u[0],u[1],u[2],u[3],u[4],u[5],u[6],u[7],
+                 u[8],u[9],u[10],u[11],u[12],u[13],u[14],u[15]);
+        setProperty("kUSBContainerID",text);
+        // WindowServer's digitizer listener (WSHIDDisplayEventListener::handle_digitizer_added) reads the service's "displayUUID" string
+        // and looks the display up by it; the framebuffer publishes the same UUID as IOMFBUUID (NativeLegacyDisplay). Without the
+        // property: "digitizer service has no usable displayUUID property; treating as no digitizer added" (macOS run41).
+        setProperty("displayUUID",text);
+    }
+#endif
     bool start(IOService *provider) override {
         inputLoop=IOWorkLoop::workLoop();if(!inputLoop)return false;
         // Request the normal generic HID event personality for this owned
@@ -418,6 +451,11 @@ public:
         // and backboardd takes each as the whole touch set, so no two fingers are ever down together for UIKit (no pinch, no
         // multi-finger or system gestures).
         if(touchOnly||touchEnabled){setProperty("Built-In",true);setProperty("DisplayIntegrated",true);setProperty("DigitizerCollectionDispatch",true);}
+#if defined(XNU_TARGET_OS_OSX) && XNU_TARGET_OS_OSX
+        // macOS: WindowServer ties a digitizer to the display whose container ID equals the digitizer's kUSBContainerID (a UUID string,
+        // read up the service plane as from a USB device); the built-in display publishes that ID in its EDID (NativeLegacyDisplay.cpp).
+        if(touchOnly||touchEnabled)publishContainerID();
+#endif
         if(!IOHIDDevice::start(provider))return false;
         timer=IOTimerEventSource::timerEventSource(this,tick);
         if(!timer || inputLoop->addEventSource(timer)!=kIOReturnSuccess) {
